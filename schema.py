@@ -30,6 +30,7 @@ TIMESTAMP_LEN = len("2026-09-22T02:13:21.400")
 
 # Every rejected line gets exactly one of these reasons.
 REJECT_REASONS = (
+    "line_too_long",
     "empty_line",
     "wrong_field_count",
     "bad_timestamp",
