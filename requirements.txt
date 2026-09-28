@@ -1,0 +1,4 @@
+# Runtime: Parquet read/write + query, web page, memory sampling.
+pyarrow==25.0.1
+Flask==3.1.3
+psutil==7.2.2

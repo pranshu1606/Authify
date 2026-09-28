@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==9.1.1
+# Only used by benchmarks/ to measure the rejected alternative compactor.
+duckdb==1.5.6
