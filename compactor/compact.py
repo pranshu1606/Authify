@@ -180,8 +180,11 @@ def compact(raw_dir, out_dir, scheme="day_tank", spill_rows=SPILL_ROWS, row_grou
         bytes_done = 0
         for fidx, path in enumerate(files):
             fstat = {"file": path.name, "bytes": path.stat().st_size, "lines": 0, "valid": 0, "rejects": Counter()}
+            pos = 0  # bytes consumed in this file, for an honest progress fraction
             try:
                 for lineno, raw in enumerate(iter_lines(path), 1):
+                    if type(raw) is bytes:
+                        pos += len(raw)
                     r = parse_line(raw)
                     if type(r) is tuple:
                         ts, tank, metric, value = r
@@ -208,7 +211,7 @@ def compact(raw_dir, out_dir, scheme="day_tank", spill_rows=SPILL_ROWS, row_grou
                             s.append({"file": path.name, "line": lineno, "text": text})
                     if lineno % 1_000_000 == 0:
                         progress(phase="read", file=path.name, lines=sum(f["lines"] for f in per_file) + lineno,
-                                 fraction=(bytes_done + fstat["bytes"] * 0.5) / max(total_bytes, 1))
+                                 fraction=(bytes_done + pos) / max(total_bytes, 1))
                     fstat["lines"] = lineno
             except OSError as e:  # unreadable file: record it and keep going with the others
                 skipped.append({"file": path.name, "reason": f"{type(e).__name__}: {e}",

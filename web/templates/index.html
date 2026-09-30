@@ -13,7 +13,7 @@
 </head>
 <body>
 <h1>Fish-farm sensor log compactor</h1>
-<p class="muted">Raw append-only CSV logs &rarr; out-of-core compaction &rarr; date-partitioned Parquet &rarr; tank/time-range query.
+<p class="muted">Raw append-only CSV logs &rarr; out-of-core compaction &rarr; Parquet partitioned by date and tank &rarr; tank/time-range query.
 Declared memory ceiling: {{ ceiling }} MB.</p>
 
 <section>

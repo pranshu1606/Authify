@@ -85,8 +85,8 @@ def compaction_status():
             "returncode": _job["returncode"], "progress": None, "error": None}
     try:
         body["progress"] = json.loads(PROGRESS_FILE.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
+    except (OSError, json.JSONDecodeError):
+        pass  # not written yet, or (Windows) being replaced by the child right now; next poll gets it
     if state == "failed":
         lines = LOG_FILE.read_text(errors="replace").strip().splitlines() if LOG_FILE.exists() else []
         body["error"] = "\n".join(lines[-15:]) or f"compaction exited with code {_job['returncode']}"

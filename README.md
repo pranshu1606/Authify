@@ -1,7 +1,7 @@
 # Fish-farm sensor log compactor
 
 A batch pipeline in Python that takes append-only sensor logs too big to load
-into memory, compacts them into a date-partitioned Parquet store, and answers
+into memory, compacts them into a Parquet store partitioned by day and tank, and answers
 "what was the oxygen in tank 7 between 02:00 and 04:00 last Tuesday" in tens of
 milliseconds — returning **every** reading in the window, whichever raw file it
 landed in. A plain browser page runs the compaction, shows a run report of what
@@ -42,12 +42,12 @@ it; `docker compose down -v` deletes it.
 generator/generate.py        seeded generator -> data/raw/sensors_0N.csv + manifest.json (ground truth)
         |
 compactor/records.py         streaming reader (capped readline) + strict per-line parser -> reading | reject reason
-compactor/compact.py         pass 1: route each reading to the partition of ITS OWN timestamp,
+compactor/compact.py         pass 1: route each reading to the partition of ITS OWN day + tank,
                                       bounded buffers spilled to Arrow IPC runs (SPILL_ROWS = 2M)
                              pass 2: one partition at a time: sort by (tank_id, timestamp) -> zstd Parquet
                              atomic swap of the store + _report.json (counts, reasons, reconciliation)
         |
-data/compacted/date=YYYY-MM-DD/part-0.parquet
+data/compacted/date=YYYY-MM-DD/tank=NNN/part-0.parquet
         |
 query/engine.py              open every partition the window overlaps, filter tank + [start, end],
                              row-group statistics skip the rest
@@ -56,7 +56,7 @@ web/app.py + templates/      Flask JSON API + one HTML page; compaction runs as 
 ```
 
 Why readings split across files are never missed: a reading's partition is
-decided by its own timestamp, never by the file it came from or the order it
+decided by its own timestamp and tank, never by the file it came from or the order it
 arrived in. After compaction, readings of one tank-window from any number of
 files sit in the same partition(s), and the query opens every partition that
 overlaps the window. `source_file` is kept per reading so the page can show
@@ -82,7 +82,7 @@ A small dataset for experimenting: `python -m generator.generate --interval-ms 6
 ## Tests, acceptance check, benchmarks
 
 ```bash
-python -m pytest                       # 64 tests, ~40 s, small generated data
+python -m pytest                       # 64 tests, ~90 s, small generated data
 python -m benchmarks.acceptance        # against the real 2.59 GiB data + store: brute-force re-scan vs query
 python -m benchmarks.run               # compacts the same input 4 ways and times 32 queries on each (~25 min)
 python -m benchmarks.duckdb_spike      # the alternative we considered: DuckDB doing the whole compaction
@@ -138,9 +138,9 @@ python -m query.engine --tank 7 --start 2026-09-22T02:00 --end 2026-09-22T04:00 
   "by_metric": {"dissolved_oxygen": 18001, "temperature": 18001},
   "by_source_file": {"sensors_02.csv": 17354, "sensors_04.csv": 18648},
   "partitions_opened": 1,
-  "row_groups_read": 3,
-  "row_groups_total": 65,
-  "elapsed_ms": 30.1,
+  "row_groups_read": 2,
+  "row_groups_total": 7,
+  "elapsed_ms": 31.7,
   "note": null
 }
 {'timestamp': '2026-09-22T02:00:00.000', 'metric': 'dissolved_oxygen', 'value': 2.51, 'source_file': 'sensors_04.csv'}
@@ -154,20 +154,30 @@ ends. Other endpoints: `POST /api/compact`, `GET /api/compact/status`,
 
 ## Partitioning
 
-Daily partitions (`date=YYYY-MM-DD`), each one Parquet file sorted by
-(tank_id, timestamp) with 65,536-row row groups. Measured against the
-alternatives at this volume — see [DECISIONS.md](DECISIONS.md) and
-`benchmarks/results.json`.
+Partitioned by **day and tank** (`date=YYYY-MM-DD/tank=NNN`, 140 partitions),
+each one Parquet file sorted by (tank_id, timestamp) with 65,536-row row
+groups. Chosen by compacting the same 2.59 GiB four ways and running the same
+32 queries on each (`python -m benchmarks.run`); all four gave identical
+answers:
 
-PARTITION_TABLE
+| scheme | partitions | compaction | peak memory | query median (first run) | p95 | row groups read |
+|---|---|---|---|---|---|---|
+| none | 1 | 291 s | 213 MB | 354 ms | 493 ms | 29.7 |
+| day | 14 | 252 s | 332 MB | 24 ms | 41 ms | 3.4 |
+| **day + tank** | 140 | 277 s | **134 MB** | 31 ms | **38 ms** | **1.5** |
+| hour | 336 | 304 s | 84 MB | 70 ms | 81 ms | 3.4 |
+
+Why this point on the line, and what it costs in each direction:
+[DECISIONS.md](DECISIONS.md).
 
 ## Memory
 
 | stage | peak RSS (measured) |
 |---|---|
 | streaming scan of the 836 MB file alone | 17 MB |
-| compaction pass 1 (read, route, spill) | 81 MB |
-| compaction overall (pass 2 sorts one day in memory) | 331 MB |
+| compaction pass 1 (read, route, spill) | 98 MB |
+| compaction overall (pass 2 sorts one tank-day in memory) | 134 MB |
+| same, if partitioned by day only (sorts 4.23M rows) | 332 MB |
 | declared ceiling | 512 MB |
 
 Peak RSS is read from the OS high-water mark (`peak_wset` on Windows,
