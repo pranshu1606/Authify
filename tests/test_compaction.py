@@ -84,3 +84,29 @@ def test_rerun_replaces_store_atomically(tmp_path):
 def test_missing_raw_dir_gives_clear_error(tmp_path):
     with pytest.raises(FileNotFoundError, match="run the generator"):
         compact(tmp_path / "nope", tmp_path / "out")
+
+
+def test_empty_file_and_garbage_only_file(tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "empty.csv").write_bytes(b"")
+    (raw / "garbage.csv").write_bytes(b"\x00\x01\x02\n\xff\xfe not a log at all\n,,,\n\n")
+    report = compact(raw, tmp_path / "out")
+    assert report["input"]["files_processed"] == 2
+    assert report["totals"]["lines_read"] == 4 and report["totals"]["valid"] == 0
+    assert report["totals"]["rejects_by_reason"] == {"bad_timestamp": 1, "empty_line": 1, "wrong_field_count": 2}
+    assert report["output"]["rows"] == 0 and report["reconciliation"]["ok"]
+
+
+def test_identical_reading_in_two_files_is_kept_twice(tmp_path):
+    """Assumption (DECISIONS.md): no de-duplication. An identical line in two files cannot be told
+    apart from a probe that genuinely reported the same value twice, so both are kept and reported."""
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    line = "2026-09-22T02:30:00.000,7,dissolved_oxygen,2.50\n"
+    (raw / "a.csv").write_text(line, newline="\n")
+    (raw / "b.csv").write_text(line, newline="\n")
+    compact(raw, tmp_path / "out")
+    from query.engine import query
+    r = query(tmp_path / "out", 7, "2026-09-22T02:00", "2026-09-22T04:00")
+    assert r["count"] == 2 and r["by_source_file"] == {"a.csv": 1, "b.csv": 1}

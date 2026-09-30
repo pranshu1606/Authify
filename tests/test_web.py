@@ -56,3 +56,14 @@ def test_bad_query_is_400_with_message(client, qs):
     (tmp / "compacted" / "_report.json").write_text('{"settings": {"scheme": "day"}, "output": {}}')
     r = c.get("/api/query?" + qs)
     assert r.status_code == 400 and r.json["error"]
+
+
+def test_compaction_refused_while_generator_is_still_writing(client):
+    c, tmp = client
+    (tmp / "raw").mkdir()
+    (tmp / "raw" / "sensors_01.csv").write_text("2026-09-22T02:30:00.000,7,temperature,12.00\n")  # partial
+    (tmp / "generate.log").write_text("  day 3/14: 12,901,990 lines, 36s\n")  # no manifest yet
+    r = c.post("/api/compact")
+    assert r.status_code == 400 and "still writing" in r.json["error"]
+    d = c.get("/api/dataset")
+    assert d.status_code == 404 and d.json["generating"] and "day 3/14" in d.json["error"]
