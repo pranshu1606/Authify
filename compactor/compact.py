@@ -32,6 +32,7 @@ from pathlib import Path
 
 import psutil
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from compactor.records import iter_lines, parse_line
@@ -216,7 +217,7 @@ def compact(raw_dir, out_dir, scheme="day", spill_rows=SPILL_ROWS, row_group_row
 
         # ---------------- pass 2: per partition, sort + write Parquet ----------------
         source_names = [f.name for f in files]
-        unsorted, out_files, out_rows = [], 0, 0
+        unsorted, out_files, out_rows, tanks = [], 0, 0, set()
         for i, key in enumerate(sorted(rows_by_key)):
             rel = key_dir(key)
             part_dir = work / rel
@@ -232,6 +233,7 @@ def compact(raw_dir, out_dir, scheme="day", spill_rows=SPILL_ROWS, row_group_row
                 del batches
                 table = table.sort_by([("tank_id", "ascending"), ("timestamp", "ascending")])
                 pq.write_table(table, target, row_group_size=row_group_rows, compression="zstd")
+                tanks.update(pc.unique(table["tank_id"]).to_pylist())
                 out_rows += table.num_rows
                 del table
             else:  # too big to sort in budget: stream runs straight through, unsorted
@@ -241,6 +243,7 @@ def compact(raw_dir, out_dir, scheme="day", spill_rows=SPILL_ROWS, row_group_row
                         with pa.OSFile(str(r), "rb") as src:
                             t = _final_table(pa.ipc.open_file(src).read_all().to_batches(), source_names)
                         w.write_table(t, row_group_size=row_group_rows)
+                        tanks.update(pc.unique(t["tank_id"]).to_pylist())
                         out_rows += t.num_rows
             out_files += 1
             shutil.rmtree(staging / rel)
@@ -273,7 +276,7 @@ def compact(raw_dir, out_dir, scheme="day", spill_rows=SPILL_ROWS, row_group_row
         "reject_samples": samples,
         "output": {"partitions": len(rows_by_key), "files": out_files, "rows": out_rows,
                    "spill_rounds": state["spills"], "staging_runs": sum(runs_by_key.values()),
-                   "unsorted_partitions": unsorted,
+                   "unsorted_partitions": unsorted, "tanks": sorted(tanks),
                    "bytes": sum(p.stat().st_size for p in work.rglob("*.parquet"))},
         "per_file": per_file,
     }
