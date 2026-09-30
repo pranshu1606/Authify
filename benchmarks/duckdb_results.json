@@ -1,0 +1,72 @@
+[
+  {
+    "memory_limit": "400MB",
+    "threads": 4,
+    "sorted": true,
+    "error": "OutOfMemoryException: Out of Memory Error: could not allocate block of size 256.0 KiB (381.4 MiB/381.4 MiB used)",
+    "seconds": 1.4,
+    "peak_rss_mb": 473.1,
+    "rows_written": null,
+    "our_valid_rows": 59272426,
+    "row_difference": null,
+    "lines_rejected_by_csv_reader": null,
+    "partitions": 0,
+    "store_mb": 0.0
+  },
+  {
+    "memory_limit": "400MB",
+    "threads": 1,
+    "sorted": true,
+    "error": "OutOfMemoryException: Out of Memory Error: could not allocate block of size 256.0 KiB (381.4 MiB/381.4 MiB used)",
+    "seconds": 32.1,
+    "peak_rss_mb": 627.8,
+    "rows_written": null,
+    "our_valid_rows": 59272426,
+    "row_difference": null,
+    "lines_rejected_by_csv_reader": null,
+    "partitions": 0,
+    "store_mb": 0.0
+  },
+  {
+    "memory_limit": "400MB",
+    "threads": 4,
+    "sorted": false,
+    "error": null,
+    "seconds": 38.9,
+    "peak_rss_mb": 527.2,
+    "rows_written": 59290855,
+    "our_valid_rows": 59272426,
+    "row_difference": 18429,
+    "lines_rejected_by_csv_reader": 598153,
+    "partitions": 14,
+    "store_mb": 158.6
+  },
+  {
+    "memory_limit": "250MB",
+    "threads": 4,
+    "sorted": false,
+    "error": null,
+    "seconds": 41.8,
+    "peak_rss_mb": 480.8,
+    "rows_written": 59290855,
+    "our_valid_rows": 59272426,
+    "row_difference": 18429,
+    "lines_rejected_by_csv_reader": 598153,
+    "partitions": 14,
+    "store_mb": 158.5
+  },
+  {
+    "memory_limit": "250MB",
+    "threads": 1,
+    "sorted": true,
+    "error": "OutOfMemoryException: Out of Memory Error: could not allocate block of size 256.0 KiB (238.2 MiB/238.4 MiB used)",
+    "seconds": 2.4,
+    "peak_rss_mb": 317.7,
+    "rows_written": null,
+    "our_valid_rows": 59272426,
+    "row_difference": null,
+    "lines_rejected_by_csv_reader": null,
+    "partitions": 0,
+    "store_mb": 0.0
+  }
+]

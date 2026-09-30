@@ -40,7 +40,7 @@ def test_report_reconciles_with_generator(small_run):
 
 def test_out_of_order_input_is_sorted_within_partitions(small_run):
     base, _, report = small_run
-    assert report["output"]["partitions"] == 14 and not report["output"]["unsorted_partitions"]
+    assert report["output"]["partitions"] == 140 and not report["output"]["unsorted_partitions"]  # 14 days x 10 tanks
     for f in (base / "out").rglob("*.parquet"):
         t = ds.dataset(f).to_table()
         key = pc.add(pc.multiply(pc.cast(t["tank_id"], "int64"), 10**13), pc.cast(t["timestamp"], "int64"))
@@ -52,6 +52,7 @@ def test_every_valid_reading_lands_in_its_own_day(small_run):
     t = _store(base / "out")
     days = pc.strftime(t["timestamp"], "%Y-%m-%d")
     assert pc.all(pc.equal(days, pc.cast(t["date"], "string"))).as_py()
+    assert pc.all(pc.equal(pc.cast(t["tank_id"], "int64"), pc.cast(t["tank"], "int64"))).as_py()
 
 
 def test_unreadable_file_is_skipped_and_reported(tmp_path):
@@ -67,7 +68,7 @@ def test_unreadable_file_is_skipped_and_reported(tmp_path):
 def test_oversized_partition_falls_back_to_unsorted_without_losing_rows(tmp_path):
     m = generate(tmp_path / "raw", **SMALL)
     report = compact(tmp_path / "raw", tmp_path / "out", spill_rows=5_000, max_sort_rows=100)
-    assert len(report["output"]["unsorted_partitions"]) == 14
+    assert len(report["output"]["unsorted_partitions"]) == 140
     assert _store(tmp_path / "out").num_rows == m["totals"]["valid"]
 
 

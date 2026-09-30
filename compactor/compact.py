@@ -43,7 +43,10 @@ HOUR_MS = 3_600_000
 EPOCH = datetime(1970, 1, 1)
 
 SPILL_ROWS = 2_000_000  # pass-1 buffer budget: ~2M x 20 B = ~40 MB of payload
-MAX_SORT_ROWS = 8_000_000  # pass-2: bigger partitions are written unsorted (see docstring)
+# Pass 2 sorts a whole partition in memory. Measured on the full data: a 4.23M-row day peaked at
+# 331 MB with an ~80 MB baseline, i.e. ~60 B/row. 5M rows -> ~380 MB, leaving room under the 512 MB
+# container limit for the web server. Bigger partitions are written unsorted (see docstring).
+MAX_SORT_ROWS = 5_000_000
 ROW_GROUP_ROWS = 65_536
 REJECT_SAMPLES_PER_REASON = 5
 
@@ -135,7 +138,7 @@ def _final_table(batches, source_names):
     return t.set_column(2, "metric", metric).set_column(4, "source_file", source)
 
 
-def compact(raw_dir, out_dir, scheme="day", spill_rows=SPILL_ROWS, row_group_rows=ROW_GROUP_ROWS,
+def compact(raw_dir, out_dir, scheme="day_tank", spill_rows=SPILL_ROWS, row_group_rows=ROW_GROUP_ROWS,
             max_sort_rows=MAX_SORT_ROWS, on_progress=None):
     raw_dir, out_dir = Path(raw_dir), Path(out_dir)
     if not raw_dir.is_dir():
@@ -316,7 +319,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Compact raw sensor logs into a partitioned Parquet store.")
     p.add_argument("--raw", default="data/raw")
     p.add_argument("--out", default="data/compacted")
-    p.add_argument("--scheme", choices=sorted(SCHEMES), default="day")
+    p.add_argument("--scheme", choices=sorted(SCHEMES), default="day_tank")
     p.add_argument("--spill-rows", type=int, default=SPILL_ROWS)
     p.add_argument("--row-group-rows", type=int, default=ROW_GROUP_ROWS)
     p.add_argument("--progress-file", help="also write progress as JSON here (read by the web page)")
