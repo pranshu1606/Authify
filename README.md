@@ -25,7 +25,8 @@ On first start the container generates the input logs in the background
 (seed 42, ~3–5 minutes; the page shows "generating input logs..." and refreshes
 itself). Then, on the page:
 
-1. **Run compaction** — progress and live memory are shown; ~4–6 minutes.
+1. **Run compaction** — progress and live memory are shown; 5–8 minutes in Docker
+   (measured 328 s and 465 s on two runs on a laptop; ~4.6 min natively).
 2. Read the **run report** — files, lines, valid readings, rejected lines by
    reason with example lines, and reconciliation against the generator.
 3. **Query** — tank + start + end, or click *query this* next to one of the
@@ -178,6 +179,7 @@ Why this point on the line, and what it costs in each direction:
 | compaction pass 1 (read, route, spill) | 98 MB |
 | compaction overall (pass 2 sorts one tank-day in memory) | 134 MB |
 | same, if partitioned by day only (sorts 4.23M rows) | 332 MB |
+| compaction inside Docker (`mem_limit: 512m`): child / whole container | 162–167 MB / 178.5 MiB |
 | declared ceiling | 512 MB |
 
 Peak RSS is read from the OS high-water mark (`peak_wset` on Windows,
