@@ -15,8 +15,7 @@ figure does not include reading the brief beforehand or recording the video.
 
 ## Key assumptions
 
-The four that shape the design most; the full list is under
-[Assumptions](#assumptions-each-is-a-setting-you-could-change).
+The four that shape the design most.
 
 1. **The process gets 512 MB, and the data is five times that.** I capped the
    whole container at 512 MB with swap off and generated 2.59 GiB, with the
@@ -171,38 +170,6 @@ me to day + tank.
   also runs the web server, and at 10x volume a day is 42M rows — far past the
   sort limit — so every day would be written unsorted. Day + tank at 10x is
   ~4.2M rows per partition, still sorted in budget.
-
-## Assumptions (each is a setting you could change)
-
-1. **Memory ceiling 512 MB**, enforced for the whole container
-   (`mem_limit: 512m`, swap off). Data: 5.2x that; the largest single file is
-   1.63x.
-2. **Logs are static during a run** and each run recompacts everything. No
-   incremental or streaming compaction (out of scope).
-3. **Timestamps are naive UTC**, exactly `YYYY-MM-DDTHH:MM:SS.mmm`; anything
-   else is `bad_timestamp` (so `2026-09-22 02:00:00` with a space is rejected).
-4. **The query window is inclusive at both ends** — a reading at exactly 04:00:00.000
-   is in "02:00 to 04:00".
-5. **No de-duplication.** An identical line in two files cannot be told apart
-   from a probe that reported the same value twice, so both are returned
-   (tested).
-6. **Strict validity:** tank id must be ASCII digits in 1–999 (`7.5`, `T7`,
-   `-3`, `0` are rejected, never rounded); metric names are case-sensitive;
-   `nan`/`inf` are bad values; dissolved oxygen must be in 0–20 mg/L and
-   temperature in −2–40 °C, otherwise `out_of_range`.
-7. **A rejected line is counted, never repaired.** Nothing is dropped
-   without a number: `lines = valid + Σ rejects` is checked every run.
-8. **A query returns at most 500,000 readings.** A bigger window is refused
-   with its exact count rather than truncated (one tank for the whole
-   fortnight is 5.9M).
-9. **Sorting is an optimisation, not a correctness requirement.** A partition
-   bigger than `MAX_SORT_ROWS` = 5M (derived from the measured ~60 bytes per
-   row sorted, about 380 MB) is written unsorted and flagged in the report;
-   its answers stay correct, only slower.
-10. **Counts by metric and by source file in the query response are
-    metadata, not aggregations of the readings.** They are there to show that
-    a split window really came from two files; the raw readings are always
-    returned.
 
 ## If the volume were 10x
 
