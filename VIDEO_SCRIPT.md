@@ -135,7 +135,11 @@ Pick one or two; all happened in the transcript.
 3. **Partitioning.** "The initial plan was daily partitions, and I was going to
    defend it. The benchmark showed daily has 2.5x the memory and is the first
    to break at 10x, so I changed the decision."
-4. **Generator bug.** "Its first generator said the midnight window was split
+4. **Query read the data twice.** "The query it wrote counted rows and then
+   read them again. It looked fine on my laptop — 20 ms — but inside the
+   memory-capped container it was up to half a second. Reading only the row
+   groups the statistics allow, once, brought it to 9–19 ms."
+5. **Generator bug.** "Its first generator said the midnight window was split
    across two files; looking at the output showed it was all in one. The
    alternation counter reset every hour."
 

@@ -127,14 +127,19 @@ def query(store, tank, start, end):
     rg_total = rg_read = 0
     if files:
         dataset = ds.dataset(files, format="parquet")
+        groups = []  # only the row groups whose min/max statistics can match the filter
         for frag in dataset.get_fragments():
             rg_total += frag.num_row_groups
-            rg_read += len(frag.split_by_row_group(flt))  # row groups whose statistics can match
-        count = dataset.count_rows(filter=flt)
-        if count > MAX_RESULT_ROWS:
-            raise QueryError(f"that window holds {count:,} readings for tank {tank}; a single query returns "
-                             f"at most {MAX_RESULT_ROWS:,}, so please narrow the window")
-        table = dataset.to_table(filter=flt, columns=["timestamp", "metric", "value", "source_file"])
+            groups.extend(frag.split_by_row_group(flt))
+        rg_read = len(groups)
+        # Their row counts bound the answer for free; only pay for an exact count when the bound is high.
+        if sum(g.row_groups[0].num_rows for g in groups) > MAX_RESULT_ROWS:
+            count = dataset.count_rows(filter=flt)
+            if count > MAX_RESULT_ROWS:
+                raise QueryError(f"that window holds {count:,} readings for tank {tank}; a single query returns "
+                                 f"at most {MAX_RESULT_ROWS:,}, so please narrow the window")
+        cols = ["timestamp", "metric", "value", "source_file"]
+        table = pa.concat_tables([g.to_table(filter=flt, columns=cols) for g in groups]) if groups else             dataset.schema.empty_table().select(cols)
         # Stored dictionary-encoded (1 byte/row); decode the small result so it can be sorted.
         for i in (1, 3):
             table = table.set_column(i, table.field(i).name, pc.cast(table.column(i), pa.string()))

@@ -62,6 +62,14 @@ Compose is there because `mem_limit` lets the kernel enforce the ceiling.
   progress file fails while the web server has it open, which killed 1 run in
   5 until progress became best-effort; Arrow cannot multi-key sort
   dictionary-encoded columns, so results are decoded before sorting.
+- **A query that was fast natively and slow in the container.** The first
+  query engine counted matching rows (to enforce the 500k cap) and then read
+  them again. Natively that cost nothing visible (12–31 ms); inside the 512 MB
+  container, where the page cache is small, the same query took 82–525 ms.
+  Row-group metadata already gives an upper bound on the answer for free, so
+  the engine now reads only the row groups whose statistics can match, once,
+  and only counts exactly when that bound exceeds the cap: 9–19 ms warm and
+  60 ms cold in the container, same answers (acceptance re-run).
 
 ## What I seriously considered and rejected
 
