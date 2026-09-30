@@ -112,3 +112,12 @@ def test_oversized_window_is_refused_not_truncated(world, monkeypatch):
 def test_missing_store(tmp_path):
     with pytest.raises(StoreMissing, match="run the compaction"):
         query(tmp_path, 7, "2026-09-22T02:00", "2026-09-22T04:00")
+
+
+def test_absurdly_wide_window_is_bounded_by_the_store_not_the_calendar(world):
+    base, _ = world
+    import time
+    t0 = time.perf_counter()
+    r = query(base / "out", 7, "2026-09-22T02:00", "9999-12-31T23:59")  # refuses (too many rows) or answers
+    assert time.perf_counter() - t0 < 5
+    assert r["partitions_opened"] == 6  # 2026-09-22 .. 2026-09-27: only partitions that exist

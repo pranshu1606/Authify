@@ -19,14 +19,13 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.dataset as ds
 
-from compactor.compact import DAY_MS, EPOCH, HOUR_MS, SCHEMES
 from schema import TANK_ID_RANGE
 
 MAX_RESULT_ROWS = 500_000
@@ -74,19 +73,32 @@ def load_report(store):
     return json.loads(path.read_text())
 
 
-def _to_ms(dt):
-    return int((dt - EPOCH).total_seconds() * 1000)
+def candidate_partitions(store, scheme, tank, start, end):
+    """Relative directories of every existing partition that can hold [start, end] for this tank.
 
-
-def candidate_partitions(scheme, tank, start, end):
-    """Relative directories of every partition that can contain [start, end] for this tank."""
-    _, key_dir = SCHEMES[scheme]
+    Walks the partitions that exist (14-336 of them), not the calendar, so a
+    window like 0001-01-01 .. 9999-12-31 costs the same as a two-hour one.
+    """
     if scheme == "none":
-        yield key_dir(0)
-        return
-    step = HOUR_MS if scheme == "hour" else DAY_MS
-    for k in range(_to_ms(start) // step, _to_ms(end) // step + 1):
-        yield key_dir((k, tank) if scheme == "day_tank" else k)
+        return ["all"]
+    first, last = start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+    out = []
+    for day_dir in sorted(Path(store).glob("date=*")):
+        day = day_dir.name[len("date="):]
+        if not first <= day <= last:
+            continue
+        if scheme == "day":
+            out.append(day_dir.name)
+        elif scheme == "day_tank":
+            out.append(f"{day_dir.name}/tank={tank:03d}")
+        elif scheme == "hour":
+            for hour_dir in sorted(day_dir.glob("hour=*")):
+                h0 = datetime.fromisoformat(f"{day}T{hour_dir.name[len('hour='):]}:00")
+                if h0 <= end and h0 + timedelta(hours=1) > start:
+                    out.append(f"{day_dir.name}/{hour_dir.name}")
+        else:
+            raise ValueError(f"unknown partition scheme {scheme!r}")
+    return out
 
 
 def query(store, tank, start, end):
@@ -105,7 +117,7 @@ def query(store, tank, start, end):
     scheme = report["settings"]["scheme"]
 
     files = []
-    for rel in candidate_partitions(scheme, tank, start, end):
+    for rel in candidate_partitions(store, scheme, tank, start, end):
         files.extend(sorted(str(p) for p in (store / rel).glob("*.parquet")))
     ts_type = pa.timestamp("ms")
     flt = ((ds.field("tank_id") == tank)
