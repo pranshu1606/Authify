@@ -9,6 +9,36 @@ compaction.
 
 **Hours spent:** _fill in before submitting_
 
+## Key assumptions
+
+The four that shape the design most; the full list is under
+[Assumptions](#assumptions-each-is-a-setting-you-could-change).
+
+1. **The process gets 512 MB, and the data is five times that.** I capped the
+   whole container at 512 MB with swap off and generated 2.59 GiB, with the
+   largest single file (836 MB) bigger than the cap. Why: the brief asks for a
+   stated ceiling that the data really exceeds, and a kernel-enforced limit
+   can't be quietly dodged. This number drives the partitioning choice: pass 2
+   sorts one partition in memory, so partitions must stay small enough to sort
+   under it.
+2. **Every query names exactly one tank.** The brief rules out multi-tank
+   queries, so I partition by day *and* tank: a query opens one small file and
+   reads about 1.5 row groups. Why it matters: if cross-tank questions ("all
+   tanks at 02:00") became common, the same query would open 10 files per day,
+   and partitioning by day alone would win again.
+3. **The logs are static during a run, and each run recompacts everything.**
+   The brief says this is a batch job with no live appends. That keeps
+   compaction simple and correct, but it costs about 4.6 minutes per run today
+   and would take around 40 minutes at 10x volume. Because the logs are
+   append-only, the natural next step is to compact only each file's new tail.
+4. **A bad line is counted, never repaired, and identical readings are never
+   merged.** Tank id `7.5` is rejected, not rounded to 8. A line that appears
+   in two files is returned twice. Why: guessing wrong about a sensor reading
+   is worse than reporting it as unusable, and an identical line in two files
+   cannot be told apart from a probe that genuinely reported the same value
+   twice. Every rejected line gets exactly one reason, and
+   `lines = valid + Σ rejects` is checked on every run.
+
 ## What I chose to run, and why
 
 A hand-rolled, two-pass **partitioned sort** in plain Python, writing
