@@ -7,7 +7,11 @@ All numbers below were measured on this repo, on one Windows 11 laptop
 `benchmarks/duckdb_results.json`, and the `_report.json` written by each
 compaction.
 
-**Hours spent:** _fill in before submitting_
+**Hours spent:** about 2.7 hours of working time with the AI assistant,
+measured from the session transcript timestamps (Mon 28 Sep 21:45–22:56,
+Wed 30 Sep 14:39–16:01, and two short sessions on Thu 1 Oct). Long runs such
+as the 25-minute partition benchmark happened inside those sessions. The
+figure does not include reading the brief beforehand or recording the video.
 
 ## Key assumptions
 
