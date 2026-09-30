@@ -68,6 +68,8 @@ SCHEMES = {
              lambda k: f"date={_day(k * HOUR_MS)}/hour={k % 24:02d}"),
     "day_tank": (lambda ts, tank: (ts // DAY_MS, tank),
                  lambda k: f"date={_day(k[0] * DAY_MS)}/tank={k[1]:03d}"),
+    # Coarse extreme, kept for the benchmark: everything in one partition.
+    "none": (lambda ts, tank: 0, lambda k: "all"),
 }
 
 
@@ -317,11 +319,23 @@ def main(argv=None):
     p.add_argument("--scheme", choices=sorted(SCHEMES), default="day")
     p.add_argument("--spill-rows", type=int, default=SPILL_ROWS)
     p.add_argument("--row-group-rows", type=int, default=ROW_GROUP_ROWS)
+    p.add_argument("--progress-file", help="also write progress as JSON here (read by the web page)")
     a = p.parse_args(argv)
+    proc = psutil.Process()
 
     def show(**kw):
-        print(f"  [{kw['phase']}] {kw['fraction']:6.1%}  {kw.get('file') or kw.get('partition')}",
-              file=sys.stderr, flush=True)
+        kw["rss_mb"] = round(proc.memory_info().rss / 2**20, 1)
+        print(f"  [{kw['phase']}] {kw['fraction']:6.1%}  {kw.get('file') or kw.get('partition')}"
+              f"  rss {kw['rss_mb']} MB", file=sys.stderr, flush=True)
+        if a.progress_file:
+            try:
+                tmp = Path(a.progress_file + ".tmp")
+                tmp.write_text(json.dumps(kw))
+                os.replace(tmp, a.progress_file)  # readers never see a half-written file
+            except OSError:
+                # Best effort only: on Windows the replace fails while the web server has the file
+                # open. Progress is cosmetic and must never fail the compaction; skip this update.
+                pass
 
     try:
         r = compact(a.raw, a.out, a.scheme, a.spill_rows, a.row_group_rows, on_progress=show)

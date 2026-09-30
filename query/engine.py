@@ -81,6 +81,9 @@ def _to_ms(dt):
 def candidate_partitions(scheme, tank, start, end):
     """Relative directories of every partition that can contain [start, end] for this tank."""
     _, key_dir = SCHEMES[scheme]
+    if scheme == "none":
+        yield key_dir(0)
+        return
     step = HOUR_MS if scheme == "hour" else DAY_MS
     for k in range(_to_ms(start) // step, _to_ms(end) // step + 1):
         yield key_dir((k, tank) if scheme == "day_tank" else k)

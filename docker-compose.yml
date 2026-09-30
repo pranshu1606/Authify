@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    # The declared memory ceiling, enforced by the kernel for the WHOLE container
+    # (web server + compaction + generator). No swap, so it cannot be dodged.
+    mem_limit: 512m
+    memswap_limit: 512m
+    init: true  # reaps finished generator/compaction child processes
+    environment:
+      SEED: "42"
+    volumes:
+      - sensor-data:/data
+
+volumes:
+  sensor-data:

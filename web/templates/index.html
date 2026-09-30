@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fish-farm sensor log compactor</title>
+<style>
+  body { font-family: sans-serif; max-width: 1100px; margin: 1em auto; padding: 0 1em; }
+  table { border-collapse: collapse; margin: .5em 0; }
+  td, th { border: 1px solid #999; padding: 2px 8px; text-align: left; font-size: 14px; }
+  .ok { color: green; } .bad { color: #b00; } .muted { color: #666; }
+  section { border-top: 1px solid #ccc; margin-top: 1.5em; }
+</style>
+</head>
+<body>
+<h1>Fish-farm sensor log compactor</h1>
+<p class="muted">Raw append-only CSV logs &rarr; out-of-core compaction &rarr; date-partitioned Parquet &rarr; tank/time-range query.
+Declared memory ceiling: {{ ceiling }} MB.</p>
+
+<section>
+<h2>1. Generated input</h2>
+<div id="dataset">loading&hellip;</div>
+</section>
+
+<section>
+<h2>2. Compaction</h2>
+<button id="compact-btn">Run compaction</button>
+<span id="compact-state"></span>
+<pre id="compact-error" class="bad"></pre>
+</section>
+
+<section>
+<h2>3. Run report</h2>
+<div id="report">loading&hellip;</div>
+</section>
+
+<section>
+<h2>4. Query</h2>
+<form id="query-form">
+  Tank <input name="tank" type="number" min="1" value="7" required style="width:5em">
+  Start <input name="start" type="datetime-local" step="1" value="2026-09-22T02:00" required>
+  End <input name="end" type="datetime-local" step="1" value="2026-09-22T04:00" required>
+  <button>Query</button>
+  <span class="muted">(inclusive at both ends, UTC)</span>
+</form>
+<div id="query-result"></div>
+</section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => (typeof n === "number" ? n.toLocaleString() : String(n ?? ""));
+let planted = [];
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text !== undefined) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+function table(headers, rows) {
+  const t = el("table"), h = t.insertRow();
+  headers.forEach((x) => h.appendChild(el("th", x)));
+  rows.forEach((r) => { const tr = t.insertRow(); r.forEach((c) => { tr.insertCell().textContent = fmt(c); }); });
+  return t;
+}
+function kv(obj) { return table(["", ""], Object.entries(obj)); }
+
+async function getJSON(url, opts) {
+  const res = await fetch(url, opts);
+  const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  return { ok: res.ok, body };
+}
+
+async function loadDataset() {
+  const box = $("dataset"); box.replaceChildren();
+  const { ok, body } = await getJSON("/api/dataset");
+  if (!ok) {
+    box.appendChild(el("p", body.error, body.generating ? "muted" : "bad"));
+    if (body.generating) setTimeout(loadDataset, 3000);
+    return;
+  }
+  const t = body.totals, ceil = body.memory_ceiling_mb * 1048576;
+  box.appendChild(el("p", `${t.files} files, ${(t.bytes / 1073741824).toFixed(2)} GiB ` +
+    `(${(t.bytes / ceil).toFixed(1)}x the ${body.memory_ceiling_mb} MB ceiling), ${fmt(t.lines)} lines, seed ${body.seed}.`));
+  box.appendChild(table(["file", "MB", "lines", "valid", "rejected"], body.files.map((f) =>
+    [f.file, (f.bytes / 1048576).toFixed(1), f.lines, f.valid, Object.values(f.rejects).reduce((a, b) => a + b, 0)])));
+  planted = body.planted_windows;
+  box.appendChild(el("p", "Windows the generator deliberately split across two files (ground truth for the query):"));
+  const pt = table(["window", "tank", "start", "end", "expected readings", "split across", ""], []);
+  planted.forEach((w) => {
+    const tr = pt.insertRow();
+    [w.name, w.tank_id, w.start, w.end, w.expected_count,
+     Object.entries(w.by_file).map(([f, c]) => `${f}: ${fmt(c)}`).join(", ")].forEach((c) => { tr.insertCell().textContent = fmt(c); });
+    const b = el("button", "query this"); b.onclick = () => runQuery(w.tank_id, w.start.slice(0, 19), w.end.slice(0, 19));
+    tr.insertCell().appendChild(b);
+  });
+  box.appendChild(pt);
+}
+
+async function loadReport() {
+  const box = $("report"); box.replaceChildren();
+  const { ok, body: r } = await getJSON("/api/report");
+  if (!ok) { box.appendChild(el("p", r.error, "muted")); return; }
+  const rec = r.reconciliation;
+  box.appendChild(el("p", rec.ok ? "All reconciliation checks pass." : "RECONCILIATION FAILED - see checks below.", rec.ok ? "ok" : "bad"));
+  box.appendChild(kv({
+    "run started (UTC)": r.started_at, "elapsed": `${r.elapsed_seconds} s (read ${r.pass1_read_seconds} s + write ${r.pass2_write_seconds} s)`,
+    "partitioning": r.settings.scheme, "files discovered": r.input.files_discovered, "files processed": r.input.files_processed,
+    "files skipped": r.input.files_skipped.length, "lines read": r.totals.lines_read, "valid readings": r.totals.valid,
+    "malformed lines": r.totals.malformed, "out-of-range lines": r.totals.out_of_range,
+    "output partitions": r.output.partitions, "output rows": r.output.rows,
+    "store size": `${(r.output.bytes / 1048576).toFixed(1)} MB`,
+    "peak memory": `${r.memory.peak_rss_mb_os ?? r.memory.peak_rss_mb_sampled} MB of ${r.memory.ceiling_mb} MB ceiling`,
+  }));
+  if (r.input.files_skipped.length)
+    box.appendChild(table(["skipped file", "reason"], r.input.files_skipped.map((s) => [s.file, s.reason])));
+  box.appendChild(el("h3", "Rejected lines by reason (with examples)"));
+  box.appendChild(table(["reason", "count", "example (file:line)"], Object.entries(r.totals.rejects_by_reason).map(([k, v]) =>
+    [k, v, (r.reject_samples[k] || []).slice(0, 2).map((s) => `${s.file}:${s.line}  ${s.text}`).join("   |   ")])));
+  box.appendChild(el("h3", "Per file"));
+  box.appendChild(table(["file", "lines", "valid", "rejects"], r.per_file.map((f) => [f.file, f.lines, f.valid, JSON.stringify(f.rejects)])));
+  box.appendChild(el("h3", "Reconciliation checks"));
+  box.appendChild(table(["check", "result"], Object.entries(rec.checks).map(([k, v]) => [k, v ? "pass" : "FAIL"])));
+}
+
+async function pollCompaction() {
+  const { body: s } = await getJSON("/api/compact/status");
+  const p = s.progress;
+  let text = `state: ${s.state}`;
+  if (p) text += ` | ${p.phase === "read" ? "reading" : "writing"} ${(p.fraction * 100).toFixed(1)}%` +
+    ` ${p.file || p.partition || ""}${p.lines ? `, ${fmt(p.lines)} lines` : ""} | memory ${p.rss_mb} MB`;
+  $("compact-state").textContent = text;
+  $("compact-error").textContent = s.error || "";
+  $("compact-btn").disabled = s.state === "running";
+  if (s.state === "running") setTimeout(pollCompaction, 1000);
+  else if (s.state === "done") loadReport();
+}
+
+$("compact-btn").onclick = async () => {
+  const { ok, body } = await getJSON("/api/compact", { method: "POST" });
+  if (!ok) { $("compact-error").textContent = body.error; return; }
+  pollCompaction();
+};
+
+async function runQuery(tank, start, end) {
+  const f = $("query-form");
+  f.tank.value = tank; f.start.value = start; f.end.value = end;
+  const qs = new URLSearchParams({ tank, start, end });
+  const box = $("query-result"); box.replaceChildren(el("p", "querying..."));
+  const { ok, body: r } = await getJSON("/api/query?" + qs);
+  box.replaceChildren();
+  if (!ok) { box.appendChild(el("p", r.error, "bad")); return; }
+  const w = planted.find((p) => p.tank_id === r.tank_id && p.start === r.start && p.end === r.end);
+  if (w) box.appendChild(el("p", `Expected (generator ground truth): ${fmt(w.expected_count)} readings - got ${fmt(r.count)}: ` +
+    (w.expected_count === r.count ? "MATCH" : "MISMATCH"), w.expected_count === r.count ? "ok" : "bad"));
+  box.appendChild(kv({
+    "tank": r.tank_id, "window": `${r.start} .. ${r.end}`, "readings": r.count,
+    "by metric": JSON.stringify(r.by_metric), "by source file": JSON.stringify(r.by_source_file),
+    "partitions opened": r.partitions_opened, "row groups read": `${r.row_groups_read} of ${r.row_groups_total}`,
+    "query time": `${r.elapsed_ms} ms`,
+  }));
+  if (r.note) box.appendChild(el("p", r.note, "muted"));
+  if (r.count) {
+    const a = el("a", `download all ${fmt(r.count)} readings as CSV`); a.href = "/api/query?" + qs + "&format=csv";
+    box.appendChild(a);
+    const shown = r.readings.slice(0, 2000);
+    box.appendChild(el("p", `Showing ${fmt(shown.length)} of ${fmt(r.count)} readings, in time order.`, "muted"));
+    box.appendChild(table(["timestamp", "metric", "value", "source file"], shown.map((x) => [x.timestamp, x.metric, x.value, x.source_file])));
+  }
+}
+
+$("query-form").onsubmit = (e) => {
+  e.preventDefault();
+  const f = e.target;
+  runQuery(f.tank.value, f.start.value, f.end.value);
+};
+
+loadDataset(); loadReport(); pollCompaction();
+</script>
+</body>
+</html>
